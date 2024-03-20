@@ -1,4 +1,6 @@
 import { canonicalize } from 'json-canonicalize';
+import { sha256 } from '@noble/hashes/sha256';
+import { bytesToHex, randomBytes } from '@noble/hashes/utils';
 
 interface TypedDataField {
   name: string;
@@ -26,64 +28,115 @@ export function getEthTypesFromInputDoc(
 // Given an Input Document, generate Types according to type generation algorithm specified in EIP-712 spec:
 // https://w3c-ccg.github.io/ethereum-eip712-signature-2021-spec/#ref-for-dfn-types-generation-algorithm-2
 function getEthTypesFromInputDocHelper(
-  input: object,
-  primaryType: string
+  input: unknown,
+  primaryType: string,
+  useHashing = false
 ): Map<string, TypedDataField[]> {
   const output = new Map<string, TypedDataField[]>();
   const types = new Array<TypedDataField>();
 
   const canonicalizedInput = JSON.parse(canonicalize(input));
+  const entries = Object.entries(canonicalizedInput);
 
-  for (const property in canonicalizedInput) {
-    const val = canonicalizedInput[property];
-    const type = typeof val;
-    if (type === 'boolean') {
-      types.push({ name: property, type: 'bool' });
-    } else if (type === 'number' || type === 'bigint') {
-      types.push({ name: property, type: 'uint256' });
-    } else if (type === 'string') {
-      types.push({ name: property, type: 'string' });
-    } else if (type === 'object') {
-      if (Array.isArray(val)) {
-        if (val.length === 0) {
-          throw new Error('Array with length 0 found');
-        }
-        const arrayFirstType = typeof val[0];
-        if (
-          arrayFirstType === 'boolean' ||
-          arrayFirstType === 'number' ||
-          arrayFirstType === 'string'
-        ) {
-          for (const arrayEntry in val) {
-            if (typeof arrayEntry !== arrayFirstType) {
-              throw new Error('Array with different types found');
+  for (const [key, value] of entries) {
+    const valueType = typeof value;
+    switch (valueType) {
+      case 'boolean':
+        types.push({ name: key, type: 'bool' });
+        continue;
+      case 'number':
+      case 'bigint':
+        types.push({ name: key, type: 'uint256' });
+        continue;
+      case 'string':
+        types.push({ name: key, type: 'string' });
+        continue;
+      case 'object': {
+        if (Array.isArray(value)) {
+          if (value.length === 0) throw new Error('Array with length 0 found');
+          const arrayFirstType = typeof value[0];
+
+          let recursiveTypes: TypedDataField[] | null = null;
+          let firstElementTypesHash: string | null = null;
+
+          if (arrayFirstType === 'object') {
+            const tempPrimaryType = bytesToHex(randomBytes(32));
+
+            recursiveTypes = getEthTypesFromInputDocHelper(
+              value[0],
+              tempPrimaryType
+            ).get(tempPrimaryType);
+
+            firstElementTypesHash = bytesToHex(
+              sha256(JSON.stringify(recursiveTypes))
+            );
+          }
+
+          // Check if all elements in the array are of the same type
+          for (const arrayEntry of value) {
+            if (arrayFirstType !== typeof arrayEntry) {
+              throw new Error('Array elements of different types found');
+            }
+
+            if (arrayFirstType === 'object') {
+              const tempPrimaryType = bytesToHex(randomBytes(32));
+
+              recursiveTypes = getEthTypesFromInputDocHelper(
+                arrayEntry,
+                tempPrimaryType
+              ).get(tempPrimaryType);
+
+              const arrayEntryTypesHash = bytesToHex(
+                sha256(JSON.stringify(recursiveTypes))
+              );
+
+              if (arrayEntryTypesHash !== firstElementTypesHash) {
+                throw new Error('Array elements of different types found');
+              }
             }
           }
-          if (arrayFirstType === 'boolean') {
-            types.push({ name: property, type: 'bool[]' });
-          } else if (arrayFirstType === 'number') {
-            types.push({ name: property, type: 'number[]' });
-          } else if (arrayFirstType === 'string') {
-            types.push({ name: property, type: 'string[]' });
+
+          switch (arrayFirstType) {
+            case 'boolean':
+              types.push({ name: key, type: 'bool[]' });
+              continue;
+            case 'number':
+            case 'bigint':
+              types.push({ name: key, type: 'uint256[]' });
+              continue;
+            case 'string':
+              types.push({ name: key, type: 'string[]' });
+              continue;
+            case 'object': {
+              const typeName = useHashing
+                ? firstElementTypesHash
+                : key.charAt(0).toUpperCase() + key.substring(1);
+              types.push({ name: key, type: `${typeName}[]` });
+              output.set(firstElementTypesHash!, recursiveTypes!);
+              continue;
+            }
+            default:
+              throw new Error('Array with elements of unknown type found');
           }
-        } else {
-          throw new Error('Array with elements of unknown type found');
         }
-      } else {
-        const recursiveOutput = getEthTypesFromInputDocHelper(val, primaryType);
-        const recursiveTypes = recursiveOutput.get(primaryType);
-        const propertyType =
-          property.charAt(0).toUpperCase() + property.substring(1);
-        types.push({ name: property, type: propertyType });
-        output.set(propertyType, recursiveTypes!);
-        for (const key in recursiveOutput) {
-          if (key !== primaryType) {
-            output.set(key, recursiveOutput.get(key)!);
-          }
-        }
+
+        const tempPrimaryType = bytesToHex(randomBytes(32));
+        const recursiveTypes = getEthTypesFromInputDocHelper(
+          value,
+          tempPrimaryType
+        ).get(tempPrimaryType);
+
+        const hash = bytesToHex(sha256(JSON.stringify(recursiveTypes)));
+
+        const typeName = useHashing
+          ? hash
+          : key.charAt(0).toUpperCase() + key.substring(1);
+        types.push({ name: key, type: typeName });
+        output.set(useHashing ? hash : typeName, recursiveTypes!);
+        continue;
       }
-    } else {
-      throw new Error('Bad Type Found in Input Document');
+      default:
+        throw new Error('Unsupported type');
     }
   }
 
