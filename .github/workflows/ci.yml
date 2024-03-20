@@ -1,0 +1,31 @@
+name: CI
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - develop
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  # Snap
+  sonarcloud-snap:
+    name: SonarCloud snap
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm lint
+      - name: Build
+        run: pnpm build
+      - name: Test
+        run: pnpm test

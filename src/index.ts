@@ -1,1 +1,1 @@
-export * from "./getEthTypesFromInputDoc";
+export * from './getEthTypesFromInputDoc';
