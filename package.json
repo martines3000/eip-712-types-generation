@@ -16,7 +16,8 @@
     "compile": "tsup",
     "lint": "biome check .",
     "lint:fix": "biome check --apply .",
-    "test": "pnpm cross-env NODE_NO_WARNINGS=1 vitest"
+    "test": "pnpm cross-env NODE_NO_WARNINGS=1 vitest",
+    "prepare": "husky"
   },
   "dependencies": {
     "@noble/hashes": "^1.4.0",
@@ -30,6 +31,7 @@
     "@vitest/coverage-v8": "1.4.0",
     "cross-env": "^7.0.3",
     "husky": "^9.0.11",
+    "lint-staged": "^15.2.2",
     "rimraf": "^5.0.5",
     "tsup": "^8.0.2",
     "typescript": "^5.3.3",
