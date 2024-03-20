@@ -22,7 +22,7 @@ export function getEthTypesFromInputDoc(
     ],
     ...obj,
   };
-  return obj;
+  return JSON.parse(canonicalize(obj));
 }
 
 // Given an Input Document, generate Types according to type generation algorithm specified in EIP-712 spec:
@@ -120,19 +120,29 @@ function getEthTypesFromInputDocHelper(
           }
         }
 
+        const oldNaming = key.charAt(0).toUpperCase() + key.substring(1);
         const tempPrimaryType = bytesToHex(randomBytes(32));
         const recursiveTypes = getEthTypesFromInputDocHelper(
           value,
-          tempPrimaryType
-        ).get(tempPrimaryType);
+          useHashing ? tempPrimaryType : oldNaming
+        );
 
-        const hash = bytesToHex(sha256(JSON.stringify(recursiveTypes)));
+        const hash = bytesToHex(
+          sha256(
+            JSON.stringify(
+              recursiveTypes.get(useHashing ? tempPrimaryType : oldNaming)
+            )
+          )
+        );
 
-        const typeName = useHashing
-          ? hash
-          : key.charAt(0).toUpperCase() + key.substring(1);
+        const typeName = useHashing ? hash : oldNaming;
+
         types.push({ name: key, type: typeName });
-        output.set(useHashing ? hash : typeName, recursiveTypes!);
+
+        for (const [k, v] of recursiveTypes) {
+          output.set(k, v);
+        }
+
         continue;
       }
       default:
@@ -141,5 +151,6 @@ function getEthTypesFromInputDocHelper(
   }
 
   output.set(primaryType, types);
+
   return output;
 }
