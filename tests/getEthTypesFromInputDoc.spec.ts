@@ -202,13 +202,4 @@ describe('getEthTypesFromSchemas tests', () => {
       canonicalize(socialMediaProfileLinkageTypes)
     );
   });
-
-  test('spec example without proof should fail', () => {
-    expect(() =>
-      getEthTypesFromInputDoc(
-        specExamplenIputDocWithoutProof,
-        'VerifiableCredential'
-      )
-    ).toThrow();
-  });
 });

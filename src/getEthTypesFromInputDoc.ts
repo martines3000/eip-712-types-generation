@@ -10,9 +10,7 @@ export function getEthTypesFromInputDoc(
   primaryType = 'Document'
 ): object {
   const res = getEthTypesFromInputDocHelper(input, primaryType);
-  if (!res.has('Proof')) {
-    throw new Error('No proof was found on input document');
-  }
+
   let obj = Object.fromEntries(res);
   obj = {
     EIP712Domain: [
