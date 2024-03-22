@@ -8,7 +8,7 @@ export default defineConfig({
     pool: 'forks',
     include: ['tests/**/*.spec.ts'],
     includeSource: ['src/**/*.ts'],
-    silent: false,
+    silent: true,
     cache: false,
     environment: 'node',
     poolOptions: {
@@ -23,7 +23,7 @@ export default defineConfig({
       provider: 'v8',
       clean: true,
       reporter: ['lcov'],
-      include: ['src/libs/**/*.ts'],
+      include: ['src/**/*.ts'],
     },
   },
   define: {
