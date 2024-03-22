@@ -1,4 +1,3 @@
-import { canonicalize } from 'json-canonicalize';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, randomBytes } from '@noble/hashes/utils';
 
@@ -22,21 +21,19 @@ export function getEthTypesFromInputDoc(
     ],
     ...obj,
   };
-  return JSON.parse(canonicalize(obj));
+  return obj;
 }
 
-// Given an Input Document, generate Types according to type generation algorithm specified in EIP-712 spec:
-// https://w3c-ccg.github.io/ethereum-eip712-signature-2021-spec/#ref-for-dfn-types-generation-algorithm-2
+// Given an Input Document, generate the corresponding EIP-712 types
 function getEthTypesFromInputDocHelper(
   input: unknown,
   primaryType: string,
-  useHashing = false
+  forceInt256 = false
 ): Map<string, TypedDataField[]> {
   const output = new Map<string, TypedDataField[]>();
   const types = new Array<TypedDataField>();
 
-  const canonicalizedInput = JSON.parse(canonicalize(input));
-  const entries = Object.entries(canonicalizedInput);
+  const entries = Object.entries(input);
 
   for (const [key, value] of entries) {
     const valueType = typeof value;
@@ -46,7 +43,10 @@ function getEthTypesFromInputDocHelper(
         continue;
       case 'number':
       case 'bigint':
-        types.push({ name: key, type: 'uint256' });
+        types.push({
+          name: key,
+          type: (value as any) < 0 || forceInt256 ? 'int256' : 'uint256',
+        });
         continue;
       case 'string':
         types.push({ name: key, type: 'string' });
@@ -56,38 +56,75 @@ function getEthTypesFromInputDocHelper(
           if (value.length === 0) throw new Error('Array with length 0 found');
           const arrayFirstType = typeof value[0];
 
-          let recursiveTypes: TypedDataField[] | null = null;
+          let recursiveTypes: Map<string, TypedDataField[]> | null = null;
           let firstElementTypesHash: string | null = null;
 
+          // Objects nested in arrays will only have int256 number type
           if (arrayFirstType === 'object') {
+            if (Array.isArray(value[0])) {
+              // TODO: Add support for nested arrays
+              throw new Error('Nested arrays not supported yet');
+            }
+
             const tempPrimaryType = bytesToHex(randomBytes(32));
 
             recursiveTypes = getEthTypesFromInputDocHelper(
               value[0],
-              tempPrimaryType
-            ).get(tempPrimaryType);
-
-            firstElementTypesHash = bytesToHex(
-              sha256(JSON.stringify(recursiveTypes))
+              tempPrimaryType,
+              true // We force int256 for nested objects in arrays
             );
+
+            const primaryTypes = recursiveTypes.get(tempPrimaryType);
+            const typeName = bytesToHex(sha256(JSON.stringify(primaryTypes)));
+
+            // Set new type name that is the hash of the types
+            recursiveTypes.set(typeName, primaryTypes);
+
+            // Remove the temporary primary type
+            recursiveTypes.delete(tempPrimaryType);
+
+            firstElementTypesHash = typeName;
           }
+
+          let anyValueNegative = false;
 
           // Check if all elements in the array are of the same type
           for (const arrayEntry of value) {
-            if (arrayFirstType !== typeof arrayEntry) {
+            const arrayEntryType = typeof arrayEntry;
+            if (arrayFirstType !== arrayEntryType) {
               throw new Error('Array elements of different types found');
+            }
+
+            if (
+              !anyValueNegative &&
+              (arrayEntryType === 'number' || arrayEntryType === 'bigint')
+            ) {
+              if (arrayEntry < 0) {
+                anyValueNegative = true;
+              }
             }
 
             if (arrayFirstType === 'object') {
               const tempPrimaryType = bytesToHex(randomBytes(32));
 
-              recursiveTypes = getEthTypesFromInputDocHelper(
+              const tempRecursiveTypes = getEthTypesFromInputDocHelper(
                 arrayEntry,
-                tempPrimaryType
-              ).get(tempPrimaryType);
+                tempPrimaryType,
+                true // We force int256 for nested objects in arrays
+              );
+
+              const primaryTypes = tempRecursiveTypes.get(tempPrimaryType);
+
+              const typeName = bytesToHex(sha256(JSON.stringify(primaryTypes)));
+
+              // Set new type name that is the hash of the types
+              tempRecursiveTypes.set(typeName, primaryTypes);
+
+              // Remove the temporary primary type
+              tempRecursiveTypes.delete(tempPrimaryType);
 
               const arrayEntryTypesHash = bytesToHex(
-                sha256(JSON.stringify(recursiveTypes))
+                sha256(JSON.stringify(primaryTypes))
               );
 
               if (arrayEntryTypesHash !== firstElementTypesHash) {
@@ -102,40 +139,43 @@ function getEthTypesFromInputDocHelper(
               continue;
             case 'number':
             case 'bigint':
-              types.push({ name: key, type: 'uint256[]' });
+              types.push({
+                name: key,
+                type:
+                  anyValueNegative || forceInt256 ? 'int256[]' : 'uint256[]',
+              });
               continue;
             case 'string':
               types.push({ name: key, type: 'string[]' });
               continue;
             case 'object': {
-              const typeName = useHashing
-                ? firstElementTypesHash
-                : key.charAt(0).toUpperCase() + key.substring(1);
-              types.push({ name: key, type: `${typeName}[]` });
-              output.set(firstElementTypesHash!, recursiveTypes!);
+              types.push({ name: key, type: `${firstElementTypesHash}[]` });
+
+              for (const [k, v] of recursiveTypes) {
+                output.set(k, v);
+              }
+
               continue;
             }
             default:
-              throw new Error('Array with elements of unknown type found');
+              throw new Error('Array with elements of unsupported type found');
           }
         }
 
-        const oldNaming = key.charAt(0).toUpperCase() + key.substring(1);
         const tempPrimaryType = bytesToHex(randomBytes(32));
         const recursiveTypes = getEthTypesFromInputDocHelper(
           value,
-          useHashing ? tempPrimaryType : oldNaming
+          tempPrimaryType
         );
 
-        const hash = bytesToHex(
-          sha256(
-            JSON.stringify(
-              recursiveTypes.get(useHashing ? tempPrimaryType : oldNaming)
-            )
-          )
-        );
+        const primaryTypes = recursiveTypes.get(tempPrimaryType);
+        const typeName = bytesToHex(sha256(JSON.stringify(primaryTypes)));
 
-        const typeName = useHashing ? hash : oldNaming;
+        // Set new type name that is the hash of the types
+        recursiveTypes.set(typeName, primaryTypes);
+
+        // Remove the temporary primary type
+        recursiveTypes.delete(tempPrimaryType);
 
         types.push({ name: key, type: typeName });
 
@@ -146,7 +186,7 @@ function getEthTypesFromInputDocHelper(
         continue;
       }
       default:
-        throw new Error('Unsupported type');
+        throw new Error('Unsupported type found');
     }
   }
 

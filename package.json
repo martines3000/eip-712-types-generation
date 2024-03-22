@@ -20,13 +20,13 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@noble/hashes": "^1.4.0",
-    "json-canonicalize": "^1.0.4"
+    "@noble/hashes": "^1.4.0"
   },
   "devDependencies": {
     "@biomejs/biome": "1.6.1",
     "@commitlint/cli": "^19.0.3",
     "@commitlint/config-conventional": "^19.0.3",
+    "@metamask/eth-sig-util": "^7.0.1",
     "@types/node": "^20.11.30",
     "@vitest/coverage-v8": "1.4.0",
     "cross-env": "^7.0.3",
